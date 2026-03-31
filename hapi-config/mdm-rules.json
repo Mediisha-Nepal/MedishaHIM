@@ -1,0 +1,95 @@
+{
+  "version": "2026-03-10-patient-v1",
+  "mdmTypes": ["Patient"],
+  "candidateSearchParams": [
+    {
+      "resourceType": "Patient",
+      "searchParams": ["identifier"]
+    },
+    {
+      "resourceType": "Patient",
+      "searchParams": ["phone"]
+    },
+    {
+      "resourceType": "Patient",
+      "searchParams": ["birthdate"]
+    },
+    {
+      "resourceType": "Patient",
+      "searchParams": ["given", "family"]
+    }
+  ],
+  "candidateFilterSearchParams": [
+    {
+      "resourceType": "Patient",
+      "searchParam": "active",
+      "fixedValue": "true"
+    }
+  ],
+  "matchFields": [
+    {
+      "name": "birthdate",
+      "resourceType": "Patient",
+      "resourcePath": "birthDate",
+      "matcher": {
+        "algorithm": "STRING"
+      }
+    },
+    {
+      "name": "gender",
+      "resourceType": "Patient",
+      "resourcePath": "gender",
+      "matcher": {
+        "algorithm": "STRING"
+      }
+    },
+    {
+      "name": "phone",
+      "resourceType": "Patient",
+      "resourcePath": "telecom.value",
+      "matcher": {
+        "algorithm": "STRING"
+      }
+    },
+    {
+      "name": "firstname-meta",
+      "resourceType": "Patient",
+      "resourcePath": "name.given",
+      "matcher": {
+        "algorithm": "METAPHONE"
+      }
+    },
+    {
+      "name": "lastname-meta",
+      "resourceType": "Patient",
+      "resourcePath": "name.family",
+      "matcher": {
+        "algorithm": "METAPHONE"
+      }
+    },
+    {
+      "name": "firstname-exact",
+      "resourceType": "Patient",
+      "fhirPath": "name.given.first()",
+      "matcher": {
+        "algorithm": "STRING",
+        "exact": false
+      }
+    },
+    {
+      "name": "lastname-exact",
+      "resourceType": "Patient",
+      "resourcePath": "name.family",
+      "matcher": {
+        "algorithm": "STRING",
+        "exact": false
+      }
+    }
+  ],
+  "matchResultMap": {
+    "firstname-exact,lastname-exact,birthdate,gender,phone": "MATCH",
+    "firstname-exact,lastname-exact,birthdate,gender": "POSSIBLE_MATCH",
+    "firstname-meta,lastname-meta,birthdate,gender,phone": "POSSIBLE_MATCH",
+    "firstname-meta,lastname-meta,birthdate,gender": "POSSIBLE_MATCH"
+  }
+}

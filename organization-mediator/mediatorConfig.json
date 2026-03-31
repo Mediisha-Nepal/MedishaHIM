@@ -1,0 +1,37 @@
+{
+  "urn": "urn:mediator:organization-mediator",
+  "version": "1.0.0",
+  "name": "Organization Mediator",
+  "description": "Adaptor + orchestration mediator for organization registry: maps external JSON to FHIR Organization and forwards to organization-service",
+
+  "defaultChannelConfig": [
+    {
+      "name": "OR Organization Channel",
+      "urlPattern": "^/or/organization$",
+      "routes": [
+        {
+          "name": "Route to Organization Mediator",
+          "host": "organization-mediator",
+          "path": "/or/organization",
+          "port": "3001",
+          "primary": true,
+          "type": "http"
+        }
+      ],
+      "allow": ["admin"],
+      "methods": ["POST", "GET"],
+      "type": "http"
+    }
+  ],
+
+  "endpoints": [
+    {
+      "name": "Organization Mediator Heartbeat",
+      "host": "organization-mediator",
+      "path": "/heartbeat",
+      "port": "3001",
+      "primary": true,
+      "type": "http"
+    }
+  ]
+}

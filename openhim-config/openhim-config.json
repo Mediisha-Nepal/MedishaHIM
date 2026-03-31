@@ -1,0 +1,14 @@
+{
+  "authentication": {
+    "enableJWTAuthentication": true,
+    "enableBasicAuthentication": true,
+    "enableMutualTLSAuthentication": true,
+    "enableCustomTokenAuthentication": false,
+    "jwt": {
+      "secretOrPublicKey": "CHANGE_THIS_TO_A_LONG_SECRET",
+      "algorithms": ["HS256"],
+      "audience": ["your-downstream-service"],
+      "issuer": "your-jwt-issuer"
+    }
+  }
+}

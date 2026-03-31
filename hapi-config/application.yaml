@@ -1,0 +1,41 @@
+server:
+  port: 8080
+
+spring:
+  main:
+    allow-circular-references: true
+  flyway:
+    enabled: false
+    baseline-on-migrate: true
+    fail-on-missing-locations: false
+  datasource:
+    url: jdbc:postgresql://hapi-db:5432/hapi
+    username: admin
+    password: admin
+    driver-class-name: org.postgresql.Driver
+    hikari:
+      maximum-pool-size: 10
+  jpa:
+    properties:
+      hibernate:
+        format_sql: false
+        show_sql: false
+        dialect: ca.uhn.fhir.jpa.model.dialect.HapiFhirPostgresDialect
+
+hapi:
+  fhir:
+    default_encoding: json
+    narrative_enabled: false
+
+    mdm_enabled: true
+    mdm_rules_json_location: 'file:/app/config/mdm-rules.json'
+
+    subscription:
+      resthook_enabled: true
+
+    tester:
+      home:
+        name: Local Tester
+        server_address: 'http://localhost:8081/fhir'
+        refuse_to_fetch_third_party_urls: false
+        fhir_version: R4

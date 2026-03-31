@@ -1,0 +1,37 @@
+{
+  "urn": "urn:mediator:encounter-mediator",
+  "version": "1.0.0",
+  "name": "Encounter Mediator",
+  "description": "Adaptor + orchestration mediator for encounter workflows: maps external JSON to FHIR Encounter and forwards to encounter-service",
+
+  "defaultChannelConfig": [
+    {
+      "name": "Encounter Channel",
+      "urlPattern": "^/encounter(/.*)?$",
+      "routes": [
+        {
+          "name": "Route to Encounter Mediator",
+          "host": "encounter-mediator",
+          "path": "/encounter",
+          "port": "3002",
+          "primary": true,
+          "type": "http"
+        }
+      ],
+      "allow": ["operator"],
+      "methods": ["POST", "GET"],
+      "type": "http"
+    }
+  ],
+
+  "endpoints": [
+    {
+      "name": "Encounter Mediator Heartbeat",
+      "host": "encounter-mediator",
+      "path": "/heartbeat",
+      "port": "3002",
+      "primary": true,
+      "type": "http"
+    }
+  ]
+}

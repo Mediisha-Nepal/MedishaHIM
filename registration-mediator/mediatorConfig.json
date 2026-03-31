@@ -1,0 +1,35 @@
+{
+  "urn": "urn:mediator:registration-mediator",
+  "version": "1.0.0",
+  "name": "Registration Mediator",
+  "description": "Independent patient registration mediator: organization lookup, patient upsert, and encounter creation directly in FHIR",
+  "defaultChannelConfig": [
+    {
+      "name": "Patient Registration Channel",
+      "urlPattern": "^/registration/patient$",
+      "routes": [
+        {
+          "name": "Route to Registration Mediator",
+          "host": "registration-mediator",
+          "path": "/registration/patient",
+          "port": "3003",
+          "primary": true,
+          "type": "http"
+        }
+      ],
+      "allow": ["operator"],
+      "methods": ["POST"],
+      "type": "http"
+    }
+  ],
+  "endpoints": [
+    {
+      "name": "Registration Mediator Heartbeat",
+      "host": "registration-mediator",
+      "path": "/heartbeat",
+      "port": "3003",
+      "primary": true,
+      "type": "http"
+    }
+  ]
+}

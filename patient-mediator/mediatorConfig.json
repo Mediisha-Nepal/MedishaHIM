@@ -1,0 +1,54 @@
+{
+  "urn": "urn:mediator:client-registry-mediator",
+  "version": "1.0.0",
+  "name": "Client Registry Mediator",
+  "description": "Adaptor + orchestration mediator for client registry: maps external JSON to FHIR Patient and forwards to patient-service",
+
+  "defaultChannelConfig": [
+    {
+      "name": "CR Patient Channel",
+      "urlPattern": "^/cr/patient$",
+      "routes": [
+        {
+          "name": "Route to Client Registry Mediator",
+          "host": "client-registry-mediator",
+          "path": "/cr/patient",
+          "port": "3000",
+          "primary": true,
+          "type": "http"
+        }
+      ],
+      "allow": ["operator"],
+      "methods": ["GET"],
+      "type": "http"
+    },
+    {
+      "name": "CR Patient Bulk Channel",
+      "urlPattern": "^/cr/patient/bulk$",
+      "routes": [
+        {
+          "name": "Route to Client Registry Mediator",
+          "host": "client-registry-mediator",
+          "path": "/cr/patient/bulk",
+          "port": "3000",
+          "primary": true,
+          "type": "http"
+        }
+      ],
+      "allow": ["operator"],
+      "methods": ["POST"],
+      "type": "http"
+    }
+  ],
+
+  "endpoints": [
+    {
+      "name": "Client Registry Mediator Heartbeat",
+      "host": "client-registry-mediator",
+      "path": "/heartbeat",
+      "port": "3000",
+      "primary": true,
+      "type": "http"
+    }
+  ]
+}
