@@ -49,11 +49,11 @@ export function validateDemographicsSearch(query) {
     return {
       ok: false,
       message:
-        'Provide either identifier/value or all demographics fields: given, family, birthDate, gender (phone optional).',
+        'Provide either identifier/value or required demographics fields: given, family, gender (birthDate and phone optional).',
     };
   }
 
-  const missingRequired = ['given', 'family', 'birthDate', 'gender'].filter(
+  const missingRequired = ['given', 'family', 'gender'].filter(
     (field) => !demographics[field],
   );
   if (missingRequired.length > 0) {
@@ -63,7 +63,7 @@ export function validateDemographicsSearch(query) {
     };
   }
 
-  if (!ISO_DATE_RE.test(demographics.birthDate)) {
+  if (demographics.birthDate && !ISO_DATE_RE.test(demographics.birthDate)) {
     return { ok: false, message: 'birthDate must be in YYYY-MM-DD format.' };
   }
 

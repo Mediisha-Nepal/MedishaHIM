@@ -19,7 +19,7 @@ export async function registerEncounter(
       encounterIdentifierSystem ||
       buildSourceEncounterSystem(sourceSystem),
   });
-  console.log(fhirEncounter);
+
   if (!fhirEncounter.subject?.reference) {
     throw httpError(
       400,

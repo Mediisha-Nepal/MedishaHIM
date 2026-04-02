@@ -17,6 +17,11 @@ function entriesFromBundle(bundle) {
   return Array.isArray(bundle?.entry) ? bundle.entry : [];
 }
 
+function nonEmptyString(value) {
+  const str = (value ?? '').toString().trim();
+  return str.length ? str : undefined;
+}
+
 function patientsFromBundle(bundle) {
   return entriesFromBundle(bundle)
     .map((entry) => entry?.resource)
@@ -45,6 +50,11 @@ function getPatientDisplayName(patient) {
   const family = firstName.family || '';
   const combined = `${given} ${family}`.trim();
   return combined || null;
+}
+
+function getPatientAddresses(patient) {
+  if (!Array.isArray(patient?.address)) return [];
+  return patient.address;
 }
 
 function uniqueValues(values) {
@@ -88,6 +98,68 @@ function toEncounterHospitalRef(encounter) {
   };
 }
 
+function identifierTypeMatches(identifier, { texts = [], codes = [] }) {
+  const text = nonEmptyString(identifier?.type?.text)?.toLowerCase();
+  if (text && texts.includes(text)) return true;
+
+  const codings = Array.isArray(identifier?.type?.coding)
+    ? identifier.type.coding
+    : [];
+
+  return codings.some((coding) => {
+    const code = nonEmptyString(coding?.code)?.toLowerCase();
+    const display = nonEmptyString(coding?.display)?.toLowerCase();
+    return codes.includes(code) || texts.includes(display);
+  });
+}
+
+function hasHospitalIdType(identifier) {
+  return identifierTypeMatches(identifier, {
+    texts: [
+      'hospital id',
+      'organization id',
+      'org id',
+      'facility id',
+      'hospital code',
+      'facility code',
+    ],
+    codes: ['hospital-id', 'organization-id', 'org-id', 'facility-id'],
+  });
+}
+
+function hasEmrType(identifier) {
+  return identifierTypeMatches(identifier, {
+    texts: ['hospital mrn', 'mrn', 'emr', 'hospital emr'],
+    codes: ['mrn', 'emr'],
+  });
+}
+
+function extractIdentifierValue(organization, matcher) {
+  const identifiers = Array.isArray(organization?.identifier)
+    ? organization.identifier
+    : [];
+
+  const matched = identifiers.find(
+    (identifier) =>
+      nonEmptyString(identifier?.value) && matcher(identifier),
+  );
+
+  return nonEmptyString(matched?.value) || null;
+}
+
+function extractHospitalMetadata(organization) {
+  const firstIdentifierValue =
+    extractIdentifierValue(organization, () => true) || null;
+
+  return {
+    name: nonEmptyString(organization?.name) || null,
+    hospitalId:
+      extractIdentifierValue(organization, hasHospitalIdType) ||
+      firstIdentifierValue,
+    emrNumber: extractIdentifierValue(organization, hasEmrType),
+  };
+}
+
 async function enrichHospitals(svcOpts, hospitalRefs) {
   const uniqueIds = [...new Set(hospitalRefs.map((item) => item.id).filter(Boolean))];
   const organizations = await Promise.all(
@@ -102,13 +174,15 @@ async function enrichHospitals(svcOpts, hospitalRefs) {
   );
 
   const byId = new Map(
-    organizations.map((org) => [org.id, org.resource?.name || null]),
+    organizations.map((org) => [org.id, extractHospitalMetadata(org.resource)]),
   );
 
   return hospitalRefs.map((item) => ({
     id: item.id,
     reference: item.reference,
-    name: byId.get(item.id) || null,
+    name: byId.get(item.id)?.name || null,
+    hospital_id: byId.get(item.id)?.hospitalId || item.id,
+    emr_number: byId.get(item.id)?.emrNumber || null,
     sortKey: item.sortKey || null,
   }));
 }
@@ -163,6 +237,8 @@ async function buildHospitalsVisited(svcOpts, patientIds) {
       id: hospital.id,
       name: hospital.name,
       reference: hospital.reference,
+      hospital_id: hospital.hospital_id,
+      emr_number: hospital.emr_number,
     });
   }
 
@@ -327,6 +403,7 @@ async function buildDemographicCandidateSummary(svcOpts, group) {
     patient_id: group.patientId,
     enterprise_patient_id: group.enterprisePatientId,
     name: getPatientDisplayName(group.representativePatient),
+    address: getPatientAddresses(group.representativePatient),
     birth_date: group.representativePatient?.birthDate || null,
     gender: group.representativePatient?.gender || null,
     phone_number: phoneNumbers[0] || null,
@@ -397,7 +474,7 @@ export async function searchPatientFlow(
     };
   } else {
     const err = new Error(
-      'Provide either source identifier/value or complete demographics search fields.',
+      'Provide either source identifier/value or required demographics search fields.',
     );
     err.status = 400;
     throw err;

@@ -11,21 +11,47 @@ function nonEmptyString(value) {
   return str.length ? str : undefined;
 }
 
+function parseDemographicName(value) {
+  const name = nonEmptyString(value);
+  if (!name) return {};
+
+  const parts = name.split(/\s+/).filter(Boolean);
+  if (parts.length === 1) {
+    return { given: parts[0] };
+  }
+
+  return {
+    given: parts.slice(0, -1).join(' '),
+    family: parts[parts.length - 1],
+  };
+}
+
 export function patientSearchRoute({ serviceConfig }) {
   return async (req, res) => {
+    const parsedName = parseDemographicName(req.query.name);
+
     const identifier = nonEmptyString(req.query.identifier);
     const value = nonEmptyString(req.query.value);
     const type = nonEmptyString(req.query.type);
 
     const rawDemographics = {
       given: nonEmptyString(
-        req.query.given ?? req.query.firstName ?? req.query.first_name,
+        req.query.given ??
+          req.query.firstName ??
+          req.query.first_name ??
+          parsedName.given,
       ),
       family: nonEmptyString(
-        req.query.family ?? req.query.lastName ?? req.query.last_name,
+        req.query.family ??
+          req.query.lastName ??
+          req.query.last_name ??
+          parsedName.family,
       ),
       birthDate: nonEmptyString(
-        req.query.birthDate ?? req.query.birthdate ?? req.query.dob,
+        req.query.birthDate ??
+          req.query.birthdate ??
+          req.query.date_of_birth ??
+          req.query.dob,
       ),
       gender: nonEmptyString(req.query.gender ?? req.query.sex),
       phone: nonEmptyString(req.query.phone),

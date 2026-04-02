@@ -50,7 +50,7 @@ export async function registerPatientWorkflow(
     patientIdentifierSystem: organization.patientIdentifierSystem,
     selectedPatientId: parsed.selectedPatientId,
   });
-  console.log(patient);
+
   const encounter = await registerEncounter({ fhirConfig }, parsed.encounter, {
     patientId: patient.resource.id,
     organizationId: organization.resource.id,

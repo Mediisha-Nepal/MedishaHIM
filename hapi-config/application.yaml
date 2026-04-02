@@ -26,6 +26,7 @@ hapi:
   fhir:
     default_encoding: json
     narrative_enabled: false
+    server_id_strategy: uuid
 
     mdm_enabled: true
     mdm_rules_json_location: 'file:/app/config/mdm-rules.json'

@@ -12,6 +12,26 @@ function firstOfficialName(patient) {
   return names[0] || null;
 }
 
+function splitNameText(nameText) {
+  const tokens = String(nameText || '')
+    .split(/\s+/)
+    .map((part) => part.trim())
+    .filter(Boolean);
+
+  if (tokens.length === 0) {
+    return { given: null, family: null };
+  }
+
+  if (tokens.length === 1) {
+    return { given: tokens[0], family: null };
+  }
+
+  return {
+    given: tokens.slice(0, -1).join(' '),
+    family: tokens[tokens.length - 1],
+  };
+}
+
 function firstPhone(patient) {
   const telecom = Array.isArray(patient?.telecom) ? patient.telecom : [];
   const phone = telecom.find((item) => item?.system === 'phone' && item?.value);
@@ -20,11 +40,14 @@ function firstPhone(patient) {
 
 export function toPatientDemographics(patient) {
   const name = firstOfficialName(patient);
-  const given = Array.isArray(name?.given) ? name.given[0] : undefined;
+  const givenFromArray = Array.isArray(name?.given) ? name.given[0] : undefined;
+  const splitFromText = splitNameText(name?.text);
+  const given = nonEmptyString(givenFromArray) || splitFromText.given;
+  const family = nonEmptyString(name?.family) || splitFromText.family;
 
   return {
     given: nonEmptyString(given) || null,
-    family: nonEmptyString(name?.family) || null,
+    family: nonEmptyString(family) || null,
     birthDate: nonEmptyString(patient?.birthDate) || null,
     gender: nonEmptyString(patient?.gender) || null,
     phone: firstPhone(patient),

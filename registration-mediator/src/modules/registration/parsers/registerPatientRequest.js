@@ -9,6 +9,83 @@ function toPatientPayload(body) {
   patient.first_name = patient.first_name || nonEmptyString(body?.first_name);
   patient.last_name = patient.last_name || nonEmptyString(body?.last_name);
 
+  // Backward-compatible normalization into the new Patient FHIR mapper shape.
+  const mergedName = [patient.first_name, patient.last_name]
+    .map((value) => nonEmptyString(value))
+    .filter(Boolean)
+    .join(' ')
+    .trim();
+
+  patient.HospitalNo =
+    nonEmptyString(patient.HospitalNo) ||
+    nonEmptyString(patient.hospital_no) ||
+    nonEmptyString(patient.local_patient_id) ||
+    nonEmptyString(body?.HospitalNo) ||
+    nonEmptyString(body?.hospital_no) ||
+    nonEmptyString(body?.local_patient_id);
+
+  patient.Name =
+    nonEmptyString(patient.Name) ||
+    nonEmptyString(body?.Name) ||
+    nonEmptyString(body?.full_name) ||
+    mergedName ||
+    undefined;
+
+  patient.Sex =
+    nonEmptyString(patient.Sex) ||
+    nonEmptyString(patient.sex) ||
+    nonEmptyString(body?.Sex) ||
+    nonEmptyString(body?.sex);
+
+  patient.DOB =
+    nonEmptyString(patient.DOB) ||
+    nonEmptyString(patient.dob) ||
+    nonEmptyString(body?.DOB) ||
+    nonEmptyString(body?.dob);
+
+  patient.MobileNo =
+    nonEmptyString(patient.MobileNo) ||
+    nonEmptyString(patient.PhoneNo) ||
+    nonEmptyString(patient.phone) ||
+    nonEmptyString(body?.MobileNo) ||
+    nonEmptyString(body?.phone);
+
+  patient.Email =
+    nonEmptyString(patient.Email) ||
+    nonEmptyString(patient.email) ||
+    nonEmptyString(body?.Email) ||
+    nonEmptyString(body?.email);
+
+  if (isObject(patient.address)) {
+    if (!nonEmptyString(patient.Address)) {
+      patient.Address =
+        nonEmptyString(patient.address.text) ||
+        nonEmptyString(patient.address.line?.[0]) ||
+        undefined;
+    }
+
+    patient.nagarpalika =
+      nonEmptyString(patient.nagarpalika) ||
+      nonEmptyString(patient.address.city) ||
+      undefined;
+    patient.district =
+      nonEmptyString(patient.district) ||
+      nonEmptyString(patient.address.district) ||
+      undefined;
+    patient.province =
+      nonEmptyString(patient.province) ||
+      nonEmptyString(patient.address.state) ||
+      undefined;
+    patient.ward =
+      nonEmptyString(patient.ward) ||
+      nonEmptyString(patient.address.ward) ||
+      undefined;
+    patient.country =
+      nonEmptyString(patient.country) ||
+      nonEmptyString(patient.address.country) ||
+      undefined;
+  }
+
   return patient;
 }
 

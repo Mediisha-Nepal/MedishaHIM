@@ -284,10 +284,11 @@ export async function registerPatient({ fhirConfig }, patientInput, options) {
     );
   }
 
-  const fhirPatient = toFhirPatient({
-    ...patientInput,
-    identifier_system: sourceIdentifierSystem,
-    organization_id: options.organizationId,
+  const desiredOrgRef = `Organization/${options.organizationId}`;
+  const fhirPatient = toFhirPatient(patientInput, {
+    identifierSystem: sourceIdentifierSystem,
+    organizationReference: desiredOrgRef,
+    sourceKey: options.sourceSystem,
   });
   const selectedPatientId = parsePatientReferenceId(options.selectedPatientId);
   if (options.selectedPatientId && !selectedPatientId) {
@@ -321,7 +322,6 @@ export async function registerPatient({ fhirConfig }, patientInput, options) {
     selectedGoldenPatientId = selectedGoldenContext?.goldenPatientId || null;
   }
 
-  const desiredOrgRef = `Organization/${options.organizationId}`;
   let resource = await fetchPatientByPrimaryIdentifier(fhirConfig, {
     system: primaryIdentifier.system,
     value: primaryIdentifier.value,
