@@ -6,10 +6,6 @@ function toPatientPayload(body) {
 
   patient.local_patient_id =
     patient.local_patient_id || nonEmptyString(body?.local_patient_id);
-  patient.patient_id =
-    patient.patient_id ||
-    nonEmptyString(body?.patient_id) ||
-    nonEmptyString(body?.existing_patient_id);
   patient.first_name = patient.first_name || nonEmptyString(body?.first_name);
   patient.last_name = patient.last_name || nonEmptyString(body?.last_name);
 
@@ -97,11 +93,23 @@ export function parseRegisterPatientRequest(body, defaults, authContext = {}) {
 
   const patient = toPatientPayload(body);
   const encounter = toEncounterPayload(body);
+  const selectedPatientId =
+    nonEmptyString(body?.selected_patient_id) ||
+    nonEmptyString(body?.source_patient_id) ||
+    nonEmptyString(body?.patient_id) ||
+    nonEmptyString(body?.fhir_patient_id) ||
+    nonEmptyString(body?.enterprise_patient_id) ||
+    nonEmptyString(body?.patient?.selected_patient_id) ||
+    nonEmptyString(body?.patient?.source_patient_id) ||
+    nonEmptyString(body?.patient?.patient_id) ||
+    nonEmptyString(body?.patient?.fhir_patient_id) ||
+    nonEmptyString(body?.patient?.enterprise_patient_id);
 
   return {
     sourceSystem,
     patient,
     encounter,
+    selectedPatientId,
     organizationLookup: toOrganizationLookup(
       body,
       defaults,

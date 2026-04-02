@@ -1,4 +1,5 @@
 import { compactObject, nonEmptyString } from '../../../utils/primitives.js';
+import { buildSourceEncounterSystem } from '../../../utils/sourceSystem.js';
 
 const ENCOUNTER_CLASS_SYSTEM =
   'http://terminology.hl7.org/CodeSystem/v3-ActCode';
@@ -41,6 +42,11 @@ function buildIdentifier(input) {
     compactObject({
       system:
         nonEmptyString(input.identifier_system) ||
+        (nonEmptyString(input.source_system || input.sourceSystem)
+          ? buildSourceEncounterSystem(
+              input.source_system || input.sourceSystem,
+            )
+          : undefined) ||
         'https://registry.example.org/id/encounter/local',
       value,
     }),

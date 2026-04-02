@@ -1,43 +1,42 @@
 import { firstResourceFromBundle } from '../../../utils/bundle.js';
 import { httpError } from '../../../utils/httpError.js';
 import {
+  createMdmLink,
   createPatientConditionally,
+  queryMdmLinks,
   readPatientById,
+  searchPatientByDemographics,
   searchPatientByIdentifier,
+  submitPatientToMdm,
+  updateMdmLink,
   updatePatient,
 } from '../clients/fhirPatientClient.js';
 import { toFhirPatient } from '../mappers/toFhirPatient.js';
+import {
+  conflictingDemographicFields,
+  findExactDemographicMatches,
+  hasExactMatchDemographics,
+  toPatientDemographics,
+} from '../utils/demographics.js';
+import {
+  firstMatchGoldenPatientId,
+  isGoldenPatient,
+  mdmLinksFromParameters,
+} from '../utils/mdm.js';
 import { validatePatientInput } from '../validators/validatePatientInput.js';
 
-function hasIdentifier(patient, system, value) {
-  return (patient.identifier || []).some(
-    (identifier) => identifier.system === system && identifier.value === value,
-  );
-}
-
-function appendMissingIdentifiers(patient, identifiers) {
-  const next = {
-    ...patient,
-    identifier: [...(patient.identifier || [])],
-  };
-
-  let changed = false;
-
-  for (const identifier of identifiers || []) {
-    if (!identifier?.system || !identifier?.value) continue;
-    if (!hasIdentifier(next, identifier.system, identifier.value)) {
-      next.identifier.push(identifier);
-      changed = true;
-    }
-  }
-
-  return { patient: next, changed };
-}
-
-function syncManagingOrganization(patient, desiredReference) {
+function alignManagingOrganization(patient, desiredReference) {
   const currentReference = patient?.managingOrganization?.reference;
   if (currentReference === desiredReference) {
-    return { patient, changed: false };
+    return { patient, changed: false, conflict: false };
+  }
+
+  if (currentReference && currentReference !== desiredReference) {
+    return {
+      patient,
+      changed: false,
+      conflict: true,
+    };
   }
 
   return {
@@ -46,18 +45,26 @@ function syncManagingOrganization(patient, desiredReference) {
       managingOrganization: { reference: desiredReference },
     },
     changed: true,
+    conflict: false,
   };
 }
 
-export function parsePatientReferenceId(reference) {
+function patientClientOptions(fhirConfig) {
+  return {
+    baseUrl: fhirConfig.baseUrl,
+    timeoutMs: fhirConfig.timeoutMs,
+  };
+}
+
+function parsePatientReferenceId(reference) {
   const raw =
     typeof reference === 'object' && reference?.reference
       ? reference.reference
       : reference;
 
-  if (!raw || typeof raw !== 'string') return null;
+  if (raw === undefined || raw === null) return null;
 
-  const normalized = raw.trim();
+  const normalized = String(raw).trim();
   if (!normalized) return null;
   if (!normalized.includes('/')) return normalized;
   if (!normalized.startsWith('Patient/')) return null;
@@ -65,26 +72,54 @@ export function parsePatientReferenceId(reference) {
   return normalized.slice('Patient/'.length) || null;
 }
 
-async function fetchPatientByPrimaryIdentifier(fhirConfig, identifier, deps) {
-  const response = await deps.searchPatientByIdentifier(
-    {
-      baseUrl: fhirConfig.baseUrl,
-      timeoutMs: fhirConfig.timeoutMs,
-    },
+async function fetchPatientByPrimaryIdentifier(fhirConfig, identifier) {
+  const response = await searchPatientByIdentifier(
+    patientClientOptions(fhirConfig),
     identifier,
   );
 
   return firstResourceFromBundle(response.data, 'Patient');
 }
 
-async function fetchPatientById(fhirConfig, id, deps) {
+function preferredDemographicMatch(patients) {
+  if (!Array.isArray(patients) || patients.length === 0) return null;
+
+  return [...patients].sort((a, b) => {
+    const aUpdated = Date.parse(a?.meta?.lastUpdated || '') || 0;
+    const bUpdated = Date.parse(b?.meta?.lastUpdated || '') || 0;
+
+    if (aUpdated !== bUpdated) return bUpdated - aUpdated;
+
+    const aId = String(a?.id || '');
+    const bId = String(b?.id || '');
+    return aId.localeCompare(bId);
+  })[0];
+}
+
+async function fetchSameHospitalPatientByExactDemographics(
+  fhirConfig,
+  demographics,
+  organizationReference,
+) {
+  if (!hasExactMatchDemographics(demographics)) return null;
+
+  const response = await searchPatientByDemographics(
+    patientClientOptions(fhirConfig),
+    demographics,
+  );
+
+  const exactMatches = findExactDemographicMatches(response.data, demographics).filter(
+    (patient) => patient?.managingOrganization?.reference === organizationReference,
+  );
+
+  return preferredDemographicMatch(exactMatches);
+}
+
+async function fetchPatientById(fhirConfig, patientId) {
   try {
-    const response = await deps.readPatientById(
-      {
-        baseUrl: fhirConfig.baseUrl,
-        timeoutMs: fhirConfig.timeoutMs,
-      },
-      id,
+    const response = await readPatientById(
+      patientClientOptions(fhirConfig),
+      patientId,
     );
 
     return response.data || null;
@@ -97,24 +132,146 @@ async function fetchPatientById(fhirConfig, id, deps) {
   }
 }
 
-const defaultDeps = {
-  createPatientConditionally,
-  readPatientById,
-  searchPatientByIdentifier,
-  toFhirPatient,
-  updatePatient,
-  validatePatientInput,
-};
+async function fetchMdmLinks(fhirConfig, query) {
+  const response = await queryMdmLinks(patientClientOptions(fhirConfig), query);
+  return mdmLinksFromParameters(response.data);
+}
 
-export async function registerPatient(
-  { fhirConfig },
-  patientInput,
-  options,
-  deps = {},
+function sleep(ms) {
+  return new Promise((resolve) => {
+    setTimeout(resolve, ms);
+  });
+}
+
+async function waitForGoldenPatientId(
+  fhirConfig,
+  patientId,
+  { attempts = 3, delayMs = 250 } = {},
 ) {
-  const activeDeps = { ...defaultDeps, ...deps };
+  for (let attempt = 0; attempt < attempts; attempt += 1) {
+    const goldenPatientId = firstMatchGoldenPatientId(
+      await fetchMdmLinks(fhirConfig, {
+        resourceId: patientId,
+      }),
+    );
 
-  const validation = activeDeps.validatePatientInput(patientInput);
+    if (goldenPatientId) {
+      return goldenPatientId;
+    }
+
+    if (attempt < attempts - 1) {
+      await sleep(delayMs);
+    }
+  }
+
+  return null;
+}
+
+async function waitForGoldenPatientContext(
+  fhirConfig,
+  patientId,
+  { attempts = 3, delayMs = 250 } = {},
+) {
+  for (let attempt = 0; attempt < attempts; attempt += 1) {
+    const goldenPatientId = firstMatchGoldenPatientId(
+      await fetchMdmLinks(fhirConfig, {
+        resourceId: patientId,
+      }),
+    );
+
+    if (goldenPatientId) {
+      return {
+        goldenPatientId,
+        matchResult: 'MATCH',
+      };
+    }
+
+    if (attempt < attempts - 1) {
+      await sleep(delayMs);
+    }
+  }
+
+  return {
+    goldenPatientId: null,
+    matchResult: null,
+  };
+}
+
+async function resolveGoldenPatientContext(fhirConfig, patient) {
+  if (!patient?.id) return null;
+  if (isGoldenPatient(patient)) {
+    return {
+      goldenPatientId: patient.id,
+      matchResult: 'MATCH',
+    };
+  }
+
+  let goldenPatientId = firstMatchGoldenPatientId(
+    await fetchMdmLinks(fhirConfig, {
+      resourceId: patient.id,
+    }),
+  );
+  if (goldenPatientId) {
+    return {
+      goldenPatientId,
+      matchResult: 'MATCH',
+    };
+  }
+
+  await submitPatientToMdm(patientClientOptions(fhirConfig), patient.id);
+
+  const goldenLink = await waitForGoldenPatientContext(fhirConfig, patient.id);
+  if (goldenLink?.goldenPatientId) return goldenLink;
+
+  goldenPatientId = await waitForGoldenPatientId(fhirConfig, patient.id);
+  return {
+    goldenPatientId,
+    matchResult: goldenPatientId ? 'MATCH' : null,
+  };
+}
+
+function validateSelectedPatientDemographics(selectedPatient, requestedPatient) {
+  const conflicts = conflictingDemographicFields(
+    toPatientDemographics(selectedPatient),
+    toPatientDemographics(requestedPatient),
+  );
+
+  if (conflicts.length > 0) {
+    throw httpError(
+      409,
+      `Selected patient demographics conflict with the registration payload for: ${conflicts.join(', ')}.`,
+    );
+  }
+}
+
+async function ensureEnterpriseMatchLink(
+  fhirConfig,
+  { goldenPatientId, sourcePatientId },
+) {
+  const payload = {
+    goldenResourceId: `Patient/${goldenPatientId}`,
+    resourceId: `Patient/${sourcePatientId}`,
+    matchResult: 'MATCH',
+  };
+
+  try {
+    await createMdmLink(patientClientOptions(fhirConfig), payload);
+  } catch (error) {
+    const status = error?.response?.status;
+    if (!status || ![400, 409, 422].includes(status)) {
+      throw error;
+    }
+
+    await updateMdmLink(patientClientOptions(fhirConfig), payload);
+  }
+}
+
+function uniquePatientIds(ids) {
+  return [...new Set((ids || []).filter(Boolean))];
+}
+
+export async function registerPatient({ fhirConfig }, patientInput, options) {
+  const validation = validatePatientInput(patientInput);
   if (!validation.ok) {
     throw httpError(400, validation.message);
   }
@@ -127,11 +284,18 @@ export async function registerPatient(
     );
   }
 
-  const fhirPatient = activeDeps.toFhirPatient({
+  const fhirPatient = toFhirPatient({
     ...patientInput,
     identifier_system: sourceIdentifierSystem,
     organization_id: options.organizationId,
   });
+  const selectedPatientId = parsePatientReferenceId(options.selectedPatientId);
+  if (options.selectedPatientId && !selectedPatientId) {
+    throw httpError(
+      400,
+      'selected patient id must be a Patient id or Patient/{id} reference.',
+    );
+  }
 
   const primaryIdentifier = fhirPatient.identifier?.[0];
   if (!primaryIdentifier?.system || !primaryIdentifier?.value) {
@@ -141,43 +305,56 @@ export async function registerPatient(
     );
   }
 
-  const desiredOrgRef = `Organization/${options.organizationId}`;
-  const explicitPatientId = parsePatientReferenceId(
-    options.existingPatientReference || options.existingPatientId,
-  );
-  let resource = explicitPatientId
-    ? await fetchPatientById(fhirConfig, explicitPatientId, activeDeps)
-    : null;
+  let selectedPatient = null;
+  let selectedGoldenPatientId = null;
+  if (selectedPatientId) {
+    selectedPatient = await fetchPatientById(fhirConfig, selectedPatientId);
+    if (!selectedPatient?.id) {
+      throw httpError(404, `Patient/${selectedPatientId} was not found.`);
+    }
 
-  if (explicitPatientId && !resource) {
-    throw httpError(404, `Patient/${explicitPatientId} was not found.`);
+    validateSelectedPatientDemographics(selectedPatient, fhirPatient);
+    const selectedGoldenContext = await resolveGoldenPatientContext(
+      fhirConfig,
+      selectedPatient,
+    );
+    selectedGoldenPatientId = selectedGoldenContext?.goldenPatientId || null;
   }
 
-  const identifierMatch = await fetchPatientByPrimaryIdentifier(
-    fhirConfig,
-    {
-      system: primaryIdentifier.system,
-      value: primaryIdentifier.value,
-    },
-    activeDeps,
-  );
+  const desiredOrgRef = `Organization/${options.organizationId}`;
+  let resource = await fetchPatientByPrimaryIdentifier(fhirConfig, {
+    system: primaryIdentifier.system,
+    value: primaryIdentifier.value,
+  });
 
-  if (resource && identifierMatch && resource.id !== identifierMatch.id) {
+  if (selectedPatientId && resource?.id !== selectedPatientId && !selectedGoldenPatientId) {
     throw httpError(
       409,
-      `Patient/${resource.id} conflicts with existing patient Patient/${identifierMatch.id} for identifier ${primaryIdentifier.system}|${primaryIdentifier.value}.`,
+      `Selected Patient/${selectedPatientId} is not linked to a golden patient yet. Confirm a candidate that already has an MDM link, or wait for MDM processing before retrying.`,
     );
   }
 
-  if (!resource) {
-    resource = identifierMatch;
-  }
-
-  let action = resource ? 'existing' : 'created';
-  let status = resource ? 200 : 201;
+  let action = 'existing';
+  let status = 200;
 
   if (!resource) {
-    const createResponse = await activeDeps.createPatientConditionally(
+    const sameHospitalDemographicMatch =
+      await fetchSameHospitalPatientByExactDemographics(
+        fhirConfig,
+        toPatientDemographics(fhirPatient),
+        desiredOrgRef,
+      );
+
+    if (sameHospitalDemographicMatch?.id) {
+      return {
+        status: 200,
+        action: 'same_hospital_existing',
+        resource: sameHospitalDemographicMatch,
+        identifierSystem: sourceIdentifierSystem,
+      };
+    }
+
+    const createResponse = await createPatientConditionally(
       {
         baseUrl: fhirConfig.baseUrl,
         timeoutMs: fhirConfig.timeoutMs,
@@ -194,14 +371,10 @@ export async function registerPatient(
     action = createResponse.status === 201 ? 'created' : 'existing';
 
     if (!resource?.id) {
-      resource = await fetchPatientByPrimaryIdentifier(
-        fhirConfig,
-        {
-          system: primaryIdentifier.system,
-          value: primaryIdentifier.value,
-        },
-        activeDeps,
-      );
+      resource = await fetchPatientByPrimaryIdentifier(fhirConfig, {
+        system: primaryIdentifier.system,
+        value: primaryIdentifier.value,
+      });
     }
 
     if (!resource?.id) {
@@ -209,22 +382,45 @@ export async function registerPatient(
     }
   }
 
-  const idMerge = appendMissingIdentifiers(resource, fhirPatient.identifier);
-  const orgMerge = syncManagingOrganization(idMerge.patient, desiredOrgRef);
+  const orgAlignment = alignManagingOrganization(resource, desiredOrgRef);
+  if (orgAlignment.conflict) {
+    throw httpError(
+      409,
+      `Patient/${resource.id} is already managed by ${resource.managingOrganization.reference} and cannot be reassigned to ${desiredOrgRef}.`,
+    );
+  }
 
-  if (idMerge.changed || orgMerge.changed) {
-    const updateResponse = await activeDeps.updatePatient(
+  if (orgAlignment.changed) {
+    const updateResponse = await updatePatient(
       {
         baseUrl: fhirConfig.baseUrl,
         timeoutMs: fhirConfig.timeoutMs,
       },
-      orgMerge.patient,
+      orgAlignment.patient,
     );
 
     resource = updateResponse.data;
     status = updateResponse.status;
     if (action !== 'created') {
       action = 'updated';
+    }
+  }
+
+  if (resource?.id) {
+    await submitPatientToMdm(patientClientOptions(fhirConfig), resource.id);
+  }
+
+  if (selectedGoldenPatientId && resource?.id) {
+    const sourcePatientsToLink = uniquePatientIds([
+      resource.id,
+      !isGoldenPatient(selectedPatient) ? selectedPatient?.id : null,
+    ]);
+
+    for (const sourcePatientId of sourcePatientsToLink) {
+      await ensureEnterpriseMatchLink(fhirConfig, {
+        goldenPatientId: selectedGoldenPatientId,
+        sourcePatientId,
+      });
     }
   }
 

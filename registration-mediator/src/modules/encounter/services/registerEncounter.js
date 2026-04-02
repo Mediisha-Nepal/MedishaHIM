@@ -1,66 +1,33 @@
 import { httpError } from '../../../utils/httpError.js';
+import { buildSourceEncounterSystem } from '../../../utils/sourceSystem.js';
 import { createEncounter } from '../clients/fhirEncounterClient.js';
 import { toFhirEncounter } from '../mappers/toFhirEncounter.js';
-
-function parsePatientReferenceId(value) {
-  const raw =
-    typeof value === 'object' && value?.reference ? value.reference : value;
-
-  if (raw === null || raw === undefined) return null;
-
-  const normalized = String(raw).trim();
-  if (!normalized) return null;
-  if (!normalized.includes('/')) return normalized;
-  if (!normalized.startsWith('Patient/')) return null;
-
-  return normalized.slice('Patient/'.length) || null;
-}
-
-export function resolveEncounterPatientId(encounterInput = {}) {
-  return (
-    parsePatientReferenceId(encounterInput.subject) ||
-    parsePatientReferenceId(encounterInput.patient_id) ||
-    parsePatientReferenceId(encounterInput.patientId)
-  );
-}
-
-const defaultDeps = {
-  createEncounter,
-  toFhirEncounter,
-};
 
 export async function registerEncounter(
   { fhirConfig },
   encounterInput,
-  { patientId, organizationId },
-  deps = {},
+  { patientId, organizationId, encounterIdentifierSystem, sourceSystem },
 ) {
-  const activeDeps = { ...defaultDeps, ...deps };
-  const resolvedPatientId = String(patientId);
-  const requestedPatientId = resolveEncounterPatientId(encounterInput);
+  const { subject: ignoredSubject, ...safeEncounterInput } = encounterInput || {};
 
-  if (requestedPatientId && requestedPatientId !== resolvedPatientId) {
-    throw httpError(
-      409,
-      `Encounter subject Patient/${requestedPatientId} does not match resolved patient Patient/${resolvedPatientId}.`,
-    );
-  }
-
-  const fhirEncounter = activeDeps.toFhirEncounter({
-    ...encounterInput,
-    patient_id: resolvedPatientId,
-    subject: { reference: `Patient/${resolvedPatientId}` },
+  const fhirEncounter = toFhirEncounter({
+    ...safeEncounterInput,
+    patient_id: patientId,
     organization_id: organizationId,
+    identifier_system:
+      safeEncounterInput?.identifier_system ||
+      encounterIdentifierSystem ||
+      buildSourceEncounterSystem(sourceSystem),
   });
-
+  console.log(fhirEncounter);
   if (!fhirEncounter.subject?.reference) {
     throw httpError(
       400,
-      'Encounter subject is required (provide patient_id or subject reference).',
+      'Encounter subject could not be derived from the resolved patient registration.',
     );
   }
 
-  const response = await activeDeps.createEncounter(
+  const response = await createEncounter(
     {
       baseUrl: fhirConfig.baseUrl,
       timeoutMs: fhirConfig.timeoutMs,

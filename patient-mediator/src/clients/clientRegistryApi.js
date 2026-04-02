@@ -89,9 +89,19 @@ export async function readOrganizationById({ baseUrl, timeoutMs }, id) {
 
 // ── MDM Links ───────────────────────────────────────────────────────────
 
-export async function queryMdmLinks({ baseUrl, timeoutMs }, resourceId) {
+export async function queryMdmLinks({ baseUrl, timeoutMs }, query = {}) {
+  const params = { resourceType: 'Patient' };
+
+  if (typeof query === 'string') {
+    params.resourceId = query;
+  } else {
+    if (query?.resourceId) params.resourceId = query.resourceId;
+    if (query?.goldenResourceId) params.goldenResourceId = query.goldenResourceId;
+    if (query?.matchResult) params.matchResult = query.matchResult;
+  }
+
   const res = await getClient({ baseUrl, timeoutMs }).get('/$mdm-query-links', {
-    params: { resourceType: 'Patient', resourceId },
+    params,
   });
   return wrap(res);
 }

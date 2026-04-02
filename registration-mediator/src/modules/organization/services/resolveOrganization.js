@@ -3,9 +3,9 @@ import { firstResourceFromBundle } from '../../../utils/bundle.js';
 import { httpError } from '../../../utils/httpError.js';
 import { nonEmptyString } from '../../../utils/primitives.js';
 
-function hasHospitalMrnType(identifier) {
+function identifierTypeMatches(identifier, { texts = [], codes = [] }) {
   const text = nonEmptyString(identifier?.type?.text)?.toLowerCase();
-  if (text && (text === 'hospital mrn' || text === 'mrn')) return true;
+  if (text && texts.includes(text)) return true;
 
   const codings = Array.isArray(identifier?.type?.coding)
     ? identifier.type.coding
@@ -14,21 +14,43 @@ function hasHospitalMrnType(identifier) {
   return codings.some((coding) => {
     const code = nonEmptyString(coding?.code)?.toLowerCase();
     const display = nonEmptyString(coding?.display)?.toLowerCase();
-    return code === 'mrn' || display === 'hospital mrn' || display === 'mrn';
+    return codes.includes(code) || texts.includes(display);
   });
 }
 
-function extractPatientIdentifierSystem(organization) {
+function hasHospitalMrnType(identifier) {
+  return identifierTypeMatches(identifier, {
+    texts: ['hospital mrn', 'mrn'],
+    codes: ['mrn'],
+  });
+}
+
+function hasHospitalVnType(identifier) {
+  return identifierTypeMatches(identifier, {
+    texts: ['hospital vn', 'vn', 'visit number', 'hospital visit number'],
+    codes: ['vn'],
+  });
+}
+
+function extractIdentifierSystem(organization, matcher) {
   const identifiers = Array.isArray(organization?.identifier)
     ? organization.identifier
     : [];
 
-  const mrnIdentifier = identifiers.find(
+  const matchedIdentifier = identifiers.find(
     (identifier) =>
-      nonEmptyString(identifier?.system) && hasHospitalMrnType(identifier),
+      nonEmptyString(identifier?.system) && matcher(identifier),
   );
 
-  return nonEmptyString(mrnIdentifier?.system);
+  return nonEmptyString(matchedIdentifier?.system);
+}
+
+function extractPatientIdentifierSystem(organization) {
+  return extractIdentifierSystem(organization, hasHospitalMrnType);
+}
+
+function extractEncounterIdentifierSystem(organization) {
+  return extractIdentifierSystem(organization, hasHospitalVnType);
 }
 
 export async function resolveOrganization({ fhirConfig }, lookup) {
@@ -56,5 +78,6 @@ export async function resolveOrganization({ fhirConfig }, lookup) {
     lookup,
     resource: organization,
     patientIdentifierSystem: extractPatientIdentifierSystem(organization),
+    encounterIdentifierSystem: extractEncounterIdentifierSystem(organization),
   };
 }

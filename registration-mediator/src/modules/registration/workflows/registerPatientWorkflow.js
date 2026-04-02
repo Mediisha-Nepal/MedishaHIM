@@ -10,7 +10,7 @@ function toFullUrl(fhirBaseUrl, resource) {
 }
 
 function buildRegistrationBundle({ fhirBaseUrl, patient, encounter }) {
-  const resources = [patient, encounter];
+  const resources = [patient, encounter].filter(Boolean);
   const entries = resources.map((resource) => ({
     fullUrl: toFullUrl(fhirBaseUrl, resource),
     resource,
@@ -23,18 +23,6 @@ function buildRegistrationBundle({ fhirBaseUrl, patient, encounter }) {
     total: entries.length,
     entry: entries,
   };
-}
-
-function resolveExistingPatientReference(parsed) {
-  return (
-    parsed?.encounter?.subject?.reference ||
-    parsed?.encounter?.subject ||
-    parsed?.encounter?.patient_id ||
-    parsed?.encounter?.patientId ||
-    parsed?.patient?.patient_id ||
-    parsed?.patient?.id ||
-    null
-  );
 }
 
 export async function registerPatientWorkflow(
@@ -51,30 +39,27 @@ export async function registerPatientWorkflow(
     authContext,
   );
 
-  const organization = await resolveOrganization({ fhirConfig }, parsed.organizationLookup);
-
-  const patient = await registerPatient(
+  const organization = await resolveOrganization(
     { fhirConfig },
-    parsed.patient,
-    {
-      sourceSystem: parsed.sourceSystem,
-      organizationId: organization.resource.id,
-      patientIdentifierSystem: organization.patientIdentifierSystem,
-      existingPatientReference: resolveExistingPatientReference(parsed),
-    },
+    parsed.organizationLookup,
   );
 
-  const encounter = await registerEncounter(
-    { fhirConfig },
-    parsed.encounter,
-    {
-      patientId: patient.resource.id,
-      organizationId: organization.resource.id,
-    },
-  );
+  const patient = await registerPatient({ fhirConfig }, parsed.patient, {
+    sourceSystem: parsed.sourceSystem,
+    organizationId: organization.resource.id,
+    patientIdentifierSystem: organization.patientIdentifierSystem,
+    selectedPatientId: parsed.selectedPatientId,
+  });
+  console.log(patient);
+  const encounter = await registerEncounter({ fhirConfig }, parsed.encounter, {
+    patientId: patient.resource.id,
+    organizationId: organization.resource.id,
+    encounterIdentifierSystem: organization.encounterIdentifierSystem,
+    sourceSystem: parsed.sourceSystem,
+  });
 
   const overallStatus =
-    patient.action === 'created' || encounter.action === 'created' ? 201 : 200;
+    patient.action === 'created' || encounter?.action === 'created' ? 201 : 200;
 
   const bundle = buildRegistrationBundle({
     fhirBaseUrl: fhirConfig.baseUrl,

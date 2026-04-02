@@ -26,6 +26,13 @@ const compact = (obj) =>
     }),
   );
 
+function buildSourceEncounterSystem(input) {
+  const source = nonEmptyString(input?.source_system || input?.sourceSystem);
+  return source
+    ? `https://registry.example.org/id/encounter/${source.toLowerCase()}`
+    : undefined;
+}
+
 function toReference(resourceType, value) {
   if (!value) return undefined;
   if (typeof value === 'object' && value.reference) return value;
@@ -50,6 +57,7 @@ function buildIdentifier(input) {
     compact({
       system:
         nonEmptyString(input.identifier_system) ||
+        buildSourceEncounterSystem(input) ||
         'https://registry.example.org/id/encounter/local',
       value,
     }),

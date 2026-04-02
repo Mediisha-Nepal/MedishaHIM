@@ -1,5 +1,5 @@
 {
-  "version": "2026-03-10-patient-v1",
+  "version": "2026-03-10-v1",
   "mdmTypes": ["Patient"],
   "candidateSearchParams": [
     {
@@ -52,22 +52,6 @@
       }
     },
     {
-      "name": "firstname-meta",
-      "resourceType": "Patient",
-      "resourcePath": "name.given",
-      "matcher": {
-        "algorithm": "METAPHONE"
-      }
-    },
-    {
-      "name": "lastname-meta",
-      "resourceType": "Patient",
-      "resourcePath": "name.family",
-      "matcher": {
-        "algorithm": "METAPHONE"
-      }
-    },
-    {
       "name": "firstname-exact",
       "resourceType": "Patient",
       "fhirPath": "name.given.first()",
@@ -87,9 +71,6 @@
     }
   ],
   "matchResultMap": {
-    "firstname-exact,lastname-exact,birthdate,gender,phone": "MATCH",
-    "firstname-exact,lastname-exact,birthdate,gender": "POSSIBLE_MATCH",
-    "firstname-meta,lastname-meta,birthdate,gender,phone": "POSSIBLE_MATCH",
-    "firstname-meta,lastname-meta,birthdate,gender": "POSSIBLE_MATCH"
+    "firstname-exact,lastname-exact,birthdate,gender,phone": "MATCH"
   }
 }
