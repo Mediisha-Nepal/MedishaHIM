@@ -18,6 +18,19 @@ const asyncHandler = (fn) => (req, res, next) =>
 
 export function buildApp({ serviceConfig }) {
   const app = express();
+  app.use((req, res, next) => {
+    res.setHeader('Access-Control-Allow-Origin', '*');
+    res.setHeader(
+      'Access-Control-Allow-Headers',
+      'Origin, X-Requested-With, Content-Type, Accept, Authorization',
+    );
+    res.setHeader(
+      'Access-Control-Allow-Methods',
+      'GET, POST, PUT, PATCH, DELETE, OPTIONS',
+    );
+    if (req.method === 'OPTIONS') return res.sendStatus(204);
+    return next();
+  });
   app.use(express.json());
 
   // ── Routes ──
