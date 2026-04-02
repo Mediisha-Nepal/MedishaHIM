@@ -60,21 +60,45 @@ services:
     depends_on:
       - mongo-db
 
-  openhim-console:
-    container_name: openhim-console
-    image: organsushi/medisha-him:latest
-    restart: unless-stopped
-    networks:
-      - openhim
-    ports:
-      - "9000:80"
-    healthcheck:
-      test: "curl -sS http://openhim-console || exit 1"
-      interval: 30s
-      timeout: 30s
-      retries: 3
-    depends_on:
-      - openhim-core
+  # openhim-console:
+  #   container_name: openhim-console
+  #   image: organsushi/medisha-him:latest
+  #   restart: unless-stopped
+  #   networks:
+  #     - openhim
+  #   ports:
+  #     - "9000:80"
+  #   healthcheck:
+  #     test: "curl -sS http://openhim-console || exit 1"
+  #     interval: 30s
+  #     timeout: 30s
+  #     retries: 3
+  #   depends_on:
+  #     - openhim-core
+
+    openhim-console:
+      container_name: openhim-console
+      image: organsushi/medisha-him:latest
+      restart: unless-stopped
+      networks:
+        - openhim
+      environment:
+        OPENHIM_CONSOLE_PROTOCOL: "https"
+        OPENHIM_CORE_MEDIATOR_HOSTNAME: "202.51.71.81"
+        OPENHIM_MEDIATOR_API_PORT: "8080"
+        OPENHIM_CONSOLE_HOSTPATH: ""
+        OPENHIM_CONSOLE_SHOW_LOGIN: "true"
+        OPENHIM_MEDIATOR_HEALTH_WARNING_TIMEOUT: "60"
+        OPENHIM_MEDIATOR_HEALTH_DANGER_TIMEOUT: "120"
+      ports:
+        - "9000:80"
+      healthcheck:
+        test: "curl -sS http://openhim-console || exit 1"
+        interval: 30s
+        timeout: 30s
+        retries: 3
+      depends_on:
+        - openhim-core
 
   fhir:
     container_name: fhir
