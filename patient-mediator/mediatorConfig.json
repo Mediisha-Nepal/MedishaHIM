@@ -19,7 +19,7 @@
         }
       ],
       "allow": ["operator"],
-      "methods": ["GET"],
+      "methods": ["GET", "OPTIONS"],
       "type": "http"
     },
     {
@@ -36,7 +36,7 @@
         }
       ],
       "allow": ["operator"],
-      "methods": ["POST"],
+      "methods": ["POST", "OPTIONS"],
       "type": "http"
     }
   ],

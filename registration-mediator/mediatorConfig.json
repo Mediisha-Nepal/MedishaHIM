@@ -18,7 +18,7 @@
         }
       ],
       "allow": ["operator"],
-      "methods": ["POST"],
+      "methods": ["POST", "OPTIONS"],
       "type": "http"
     }
   ],

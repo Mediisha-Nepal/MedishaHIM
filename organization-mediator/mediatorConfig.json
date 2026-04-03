@@ -19,7 +19,7 @@
         }
       ],
       "allow": ["admin"],
-      "methods": ["POST", "GET"],
+      "methods": ["POST", "GET", "OPTIONS"],
       "type": "http"
     }
   ],
