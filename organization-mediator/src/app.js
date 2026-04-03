@@ -1,4 +1,5 @@
 import express from 'express';
+import cors from 'cors';
 import asyncHandler from './utils/asyncHandler.js';
 import heartbeat from './routes/heartbeat.js';
 import { organizationCreate } from './routes/organization/create.js';
@@ -14,18 +15,20 @@ import { logger } from './utils/logger.js';
 export default function createApp({ openhimConfig, fhirConfig }) {
   const app = express();
   app.use((req, res, next) => {
-    res.setHeader('Access-Control-Allow-Origin', '*');
-    res.setHeader(
-      'Access-Control-Allow-Headers',
-      'Origin, X-Requested-With, Content-Type, Accept, Authorization',
-    );
-    res.setHeader(
-      'Access-Control-Allow-Methods',
-      'GET, POST, PUT, PATCH, DELETE, OPTIONS',
-    );
-    if (req.method === 'OPTIONS') return res.sendStatus(204);
+    if (req.headers['access-control-request-private-network'] === 'true') {
+      res.setHeader('Access-Control-Allow-Private-Network', 'true');
+    }
     return next();
   });
+  app.use(
+    cors({
+      origin: true,
+      credentials: true,
+      methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
+      optionsSuccessStatus: 204,
+      maxAge: 86400,
+    }),
+  );
   app.use(express.json());
 
   app.get('/heartbeat', asyncHandler(heartbeat));
