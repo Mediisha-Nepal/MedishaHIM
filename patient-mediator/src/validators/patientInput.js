@@ -44,22 +44,12 @@ export function validateDemographicsSearch(query) {
     phone: nonEmptyString(query?.phone),
   };
 
-  const hasAnyDemographics = Object.values(demographics).some(Boolean);
-  if (!hasAnyDemographics) {
+  const hasName = Boolean(demographics.given || demographics.family);
+  if (!hasName) {
     return {
       ok: false,
       message:
-        'Provide either identifier/value or required demographics fields: given, family, gender (birthDate and phone optional).',
-    };
-  }
-
-  const missingRequired = ['given', 'family', 'gender'].filter(
-    (field) => !demographics[field],
-  );
-  if (missingRequired.length > 0) {
-    return {
-      ok: false,
-      message: `Missing required demographics field(s): ${missingRequired.join(', ')}.`,
+        'Provide either identifier/value or at least one name field for demographics search (given, family, or name).',
     };
   }
 
@@ -67,8 +57,11 @@ export function validateDemographicsSearch(query) {
     return { ok: false, message: 'birthDate must be in YYYY-MM-DD format.' };
   }
 
-  const normalizedGender = normalizeSearchGender(demographics.gender);
-  if (!normalizedGender) {
+  let normalizedGender;
+  if (demographics.gender) {
+    normalizedGender = normalizeSearchGender(demographics.gender);
+  }
+  if (demographics.gender && !normalizedGender) {
     return {
       ok: false,
       message:
@@ -80,7 +73,7 @@ export function validateDemographicsSearch(query) {
     ok: true,
     demographics: {
       ...demographics,
-      gender: normalizedGender,
+      gender: normalizedGender || undefined,
     },
   };
 }

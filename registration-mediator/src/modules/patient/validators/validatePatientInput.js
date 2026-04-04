@@ -28,15 +28,16 @@ function hasClientInjectedNhid(input) {
   });
 }
 
-export function validatePatientInput(input) {
+export function validatePatientInput(input, options = {}) {
   if (!input || typeof input !== 'object') {
     return { ok: false, message: 'Body must be a JSON object.' };
   }
 
   const hospitalNo =
     nonEmptyString(input.HospitalNo) || nonEmptyString(input.local_patient_id);
+  const allowMissingIdentifier = Boolean(options.allowMissingIdentifier);
 
-  if (!hospitalNo) {
+  if (!allowMissingIdentifier && !hospitalNo) {
     return {
       ok: false,
       message: 'HospitalNo (or local_patient_id) is required.',
@@ -46,8 +47,9 @@ export function validatePatientInput(input) {
   const fullName = nonEmptyString(input.Name);
   const hasNameParts =
     nonEmptyString(input.first_name) || nonEmptyString(input.last_name);
+  const allowMissingName = Boolean(options.allowMissingName);
 
-  if (!fullName && !hasNameParts) {
+  if (!allowMissingName && !fullName && !hasNameParts) {
     return {
       ok: false,
       message: 'Name (or first_name/last_name) is required.',

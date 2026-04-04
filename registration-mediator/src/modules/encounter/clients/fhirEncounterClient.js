@@ -22,6 +22,19 @@ function wrap(response) {
   return { status: response.status, data: response.data };
 }
 
+export async function searchEncounterByIdentifier(
+  { baseUrl, timeoutMs },
+  { system, value },
+) {
+  const response = await getClient({ baseUrl, timeoutMs }).get('/Encounter', {
+    params: {
+      identifier: `${system}|${value}`,
+    },
+  });
+
+  return wrap(response);
+}
+
 function buildConditionalCreateHeader(encounter) {
   const firstIdentifier = encounter?.identifier?.find(
     (identifier) => identifier?.system && identifier?.value,

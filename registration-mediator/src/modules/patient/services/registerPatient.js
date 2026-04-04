@@ -1,11 +1,12 @@
 import { firstResourceFromBundle } from '../../../utils/bundle.js';
 import { httpError } from '../../../utils/httpError.js';
+import { nonEmptyString } from '../../../utils/primitives.js';
 import {
   createMdmLink,
+  createPatient,
   createPatientConditionally,
   queryMdmLinks,
   readPatientById,
-  searchPatientByDemographics,
   searchPatientByIdentifier,
   submitPatientToMdm,
   updateMdmLink,
@@ -14,8 +15,6 @@ import {
 import { toFhirPatient } from '../mappers/toFhirPatient.js';
 import {
   conflictingDemographicFields,
-  findExactDemographicMatches,
-  hasExactMatchDemographics,
   toPatientDemographics,
 } from '../utils/demographics.js';
 import {
@@ -24,6 +23,9 @@ import {
   mdmLinksFromParameters,
 } from '../utils/mdm.js';
 import { validatePatientInput } from '../validators/validatePatientInput.js';
+
+const ENTERPRISE_IDENTIFIER_SYSTEM =
+  'https://registry.example.org/id/patient/golden';
 
 function alignManagingOrganization(patient, desiredReference) {
   const currentReference = patient?.managingOrganization?.reference;
@@ -81,40 +83,6 @@ async function fetchPatientByPrimaryIdentifier(fhirConfig, identifier) {
   return firstResourceFromBundle(response.data, 'Patient');
 }
 
-function preferredDemographicMatch(patients) {
-  if (!Array.isArray(patients) || patients.length === 0) return null;
-
-  return [...patients].sort((a, b) => {
-    const aUpdated = Date.parse(a?.meta?.lastUpdated || '') || 0;
-    const bUpdated = Date.parse(b?.meta?.lastUpdated || '') || 0;
-
-    if (aUpdated !== bUpdated) return bUpdated - aUpdated;
-
-    const aId = String(a?.id || '');
-    const bId = String(b?.id || '');
-    return aId.localeCompare(bId);
-  })[0];
-}
-
-async function fetchSameHospitalPatientByExactDemographics(
-  fhirConfig,
-  demographics,
-  organizationReference,
-) {
-  if (!hasExactMatchDemographics(demographics)) return null;
-
-  const response = await searchPatientByDemographics(
-    patientClientOptions(fhirConfig),
-    demographics,
-  );
-
-  const exactMatches = findExactDemographicMatches(response.data, demographics).filter(
-    (patient) => patient?.managingOrganization?.reference === organizationReference,
-  );
-
-  return preferredDemographicMatch(exactMatches);
-}
-
 async function fetchPatientById(fhirConfig, patientId) {
   try {
     const response = await readPatientById(
@@ -153,6 +121,7 @@ async function waitForGoldenPatientId(
       await fetchMdmLinks(fhirConfig, {
         resourceId: patientId,
       }),
+      { resourceId: patientId },
     );
 
     if (goldenPatientId) {
@@ -177,6 +146,7 @@ async function waitForGoldenPatientContext(
       await fetchMdmLinks(fhirConfig, {
         resourceId: patientId,
       }),
+      { resourceId: patientId },
     );
 
     if (goldenPatientId) {
@@ -210,6 +180,7 @@ async function resolveGoldenPatientContext(fhirConfig, patient) {
     await fetchMdmLinks(fhirConfig, {
       resourceId: patient.id,
     }),
+    { resourceId: patient.id },
   );
   if (goldenPatientId) {
     return {
@@ -270,12 +241,78 @@ function uniquePatientIds(ids) {
   return [...new Set((ids || []).filter(Boolean))];
 }
 
-export async function registerPatient({ fhirConfig }, patientInput, options) {
-  const validation = validatePatientInput(patientInput);
-  if (!validation.ok) {
-    throw httpError(400, validation.message);
+function withEnterpriseIdentifier(patient, enterprisePatientId) {
+  const enterpriseId = nonEmptyString(enterprisePatientId);
+  if (!enterpriseId) return { patient, changed: false };
+
+  const identifiers = Array.isArray(patient?.identifier) ? [...patient.identifier] : [];
+  const existingIndex = identifiers.findIndex(
+    (identifier) =>
+      nonEmptyString(identifier?.system) === ENTERPRISE_IDENTIFIER_SYSTEM,
+  );
+
+  if (existingIndex >= 0) {
+    if (nonEmptyString(identifiers[existingIndex]?.value) === enterpriseId) {
+      return { patient, changed: false };
+    }
+
+    identifiers[existingIndex] = {
+      ...identifiers[existingIndex],
+      value: enterpriseId,
+      type: { text: 'Enterprise Patient ID' },
+    };
+  } else {
+    identifiers.push({
+      system: ENTERPRISE_IDENTIFIER_SYSTEM,
+      value: enterpriseId,
+      type: { text: 'Enterprise Patient ID' },
+    });
   }
 
+  return {
+    patient: {
+      ...patient,
+      identifier: identifiers,
+    },
+    changed: true,
+  };
+}
+
+function firstTelecomValue(patient, system) {
+  const telecom = Array.isArray(patient?.telecom) ? patient.telecom : [];
+  const match = telecom.find((item) => item?.system === system && item?.value);
+  return match?.value || null;
+}
+
+function firstPatientNameText(patient) {
+  const names = Array.isArray(patient?.name) ? patient.name : [];
+  const firstName = names[0] || null;
+  if (!firstName) return null;
+  if (firstName.text) return firstName.text;
+
+  const given = Array.isArray(firstName.given) ? firstName.given.join(' ') : '';
+  const family = firstName.family || '';
+  const combined = `${given} ${family}`.trim();
+  return combined || null;
+}
+
+function hydratePatientInputFromSelectedPatient(patientInput, selectedPatient) {
+  if (!selectedPatient) return patientInput;
+
+  return {
+    ...patientInput,
+    Name: patientInput?.Name || firstPatientNameText(selectedPatient),
+    Sex: patientInput?.Sex || selectedPatient?.gender || patientInput?.sex,
+    DOB: patientInput?.DOB || selectedPatient?.birthDate || patientInput?.dob,
+    MobileNo:
+      patientInput?.MobileNo ||
+      patientInput?.PhoneNo ||
+      firstTelecomValue(selectedPatient, 'phone'),
+    Email: patientInput?.Email || firstTelecomValue(selectedPatient, 'email'),
+  };
+}
+
+export async function registerPatient({ fhirConfig }, patientInput, options) {
   const sourceIdentifierSystem = options.patientIdentifierSystem;
   if (!sourceIdentifierSystem) {
     throw httpError(
@@ -284,25 +321,11 @@ export async function registerPatient({ fhirConfig }, patientInput, options) {
     );
   }
 
-  const desiredOrgRef = `Organization/${options.organizationId}`;
-  const fhirPatient = toFhirPatient(patientInput, {
-    identifierSystem: sourceIdentifierSystem,
-    organizationReference: desiredOrgRef,
-    sourceKey: options.sourceSystem,
-  });
   const selectedPatientId = parsePatientReferenceId(options.selectedPatientId);
   if (options.selectedPatientId && !selectedPatientId) {
     throw httpError(
       400,
       'selected patient id must be a Patient id or Patient/{id} reference.',
-    );
-  }
-
-  const primaryIdentifier = fhirPatient.identifier?.[0];
-  if (!primaryIdentifier?.system || !primaryIdentifier?.value) {
-    throw httpError(
-      400,
-      'Patient identifier configuration is invalid (system/value missing).',
     );
   }
 
@@ -313,7 +336,49 @@ export async function registerPatient({ fhirConfig }, patientInput, options) {
     if (!selectedPatient?.id) {
       throw httpError(404, `Patient/${selectedPatientId} was not found.`);
     }
+  }
 
+  const effectivePatientInput = hydratePatientInputFromSelectedPatient(
+    patientInput,
+    selectedPatient,
+  );
+  const providedLocalPatientId = nonEmptyString(
+    effectivePatientInput?.local_patient_id,
+  );
+  const validation = validatePatientInput(effectivePatientInput, {
+    allowMissingName: Boolean(selectedPatientId),
+    allowMissingIdentifier: true,
+  });
+  if (!validation.ok) {
+    throw httpError(400, validation.message);
+  }
+
+  const desiredOrgRef = `Organization/${options.organizationId}`;
+  const patientInputForMapping = providedLocalPatientId
+    ? effectivePatientInput
+    : {
+        ...effectivePatientInput,
+        HospitalNo: undefined,
+      };
+
+  const fhirPatient = toFhirPatient(patientInputForMapping, {
+    identifierSystem: sourceIdentifierSystem,
+    organizationReference: desiredOrgRef,
+    sourceKey: options.sourceSystem,
+  });
+
+  const primaryIdentifier = fhirPatient.identifier?.[0];
+  const hasPrimaryIdentifier = Boolean(
+    primaryIdentifier?.system && primaryIdentifier?.value,
+  );
+  if (providedLocalPatientId && !hasPrimaryIdentifier) {
+    throw httpError(
+      400,
+      'Patient identifier configuration is invalid (system/value missing).',
+    );
+  }
+
+  if (selectedPatientId) {
     validateSelectedPatientDemographics(selectedPatient, fhirPatient);
     const selectedGoldenContext = await resolveGoldenPatientContext(
       fhirConfig,
@@ -322,12 +387,20 @@ export async function registerPatient({ fhirConfig }, patientInput, options) {
     selectedGoldenPatientId = selectedGoldenContext?.goldenPatientId || null;
   }
 
-  let resource = await fetchPatientByPrimaryIdentifier(fhirConfig, {
-    system: primaryIdentifier.system,
-    value: primaryIdentifier.value,
-  });
+  let resource = null;
+  if (providedLocalPatientId && hasPrimaryIdentifier) {
+    resource = await fetchPatientByPrimaryIdentifier(fhirConfig, {
+      system: primaryIdentifier.system,
+      value: primaryIdentifier.value,
+    });
+  }
 
-  if (selectedPatientId && resource?.id !== selectedPatientId && !selectedGoldenPatientId) {
+  if (
+    selectedPatientId &&
+    resource?.id &&
+    resource.id !== selectedPatientId &&
+    !selectedGoldenPatientId
+  ) {
     throw httpError(
       409,
       `Selected Patient/${selectedPatientId} is not linked to a golden patient yet. Confirm a candidate that already has an MDM link, or wait for MDM processing before retrying.`,
@@ -338,39 +411,32 @@ export async function registerPatient({ fhirConfig }, patientInput, options) {
   let status = 200;
 
   if (!resource) {
-    const sameHospitalDemographicMatch =
-      await fetchSameHospitalPatientByExactDemographics(
-        fhirConfig,
-        toPatientDemographics(fhirPatient),
-        desiredOrgRef,
-      );
-
-    if (sameHospitalDemographicMatch?.id) {
-      return {
-        status: 200,
-        action: 'same_hospital_existing',
-        resource: sameHospitalDemographicMatch,
-        identifierSystem: sourceIdentifierSystem,
-      };
-    }
-
-    const createResponse = await createPatientConditionally(
-      {
-        baseUrl: fhirConfig.baseUrl,
-        timeoutMs: fhirConfig.timeoutMs,
-      },
-      fhirPatient,
-      {
-        system: primaryIdentifier.system,
-        value: primaryIdentifier.value,
-      },
-    );
+    const createResponse =
+      providedLocalPatientId && hasPrimaryIdentifier
+        ? await createPatientConditionally(
+            {
+              baseUrl: fhirConfig.baseUrl,
+              timeoutMs: fhirConfig.timeoutMs,
+            },
+            fhirPatient,
+            {
+              system: primaryIdentifier.system,
+              value: primaryIdentifier.value,
+            },
+          )
+        : await createPatient(
+            {
+              baseUrl: fhirConfig.baseUrl,
+              timeoutMs: fhirConfig.timeoutMs,
+            },
+            fhirPatient,
+          );
 
     resource = createResponse.data;
     status = createResponse.status;
     action = createResponse.status === 201 ? 'created' : 'existing';
 
-    if (!resource?.id) {
+    if (!resource?.id && providedLocalPatientId && hasPrimaryIdentifier) {
       resource = await fetchPatientByPrimaryIdentifier(fhirConfig, {
         system: primaryIdentifier.system,
         value: primaryIdentifier.value,
@@ -406,9 +472,7 @@ export async function registerPatient({ fhirConfig }, patientInput, options) {
     }
   }
 
-  if (resource?.id) {
-    await submitPatientToMdm(patientClientOptions(fhirConfig), resource.id);
-  }
+  let goldenPatientId = selectedGoldenPatientId || null;
 
   if (selectedGoldenPatientId && resource?.id) {
     const sourcePatientsToLink = uniquePatientIds([
@@ -422,12 +486,41 @@ export async function registerPatient({ fhirConfig }, patientInput, options) {
         sourcePatientId,
       });
     }
+
+    goldenPatientId = selectedGoldenPatientId;
+  }
+
+  if (!goldenPatientId && resource?.id) {
+    await submitPatientToMdm(patientClientOptions(fhirConfig), resource.id);
+
+    const resolvedContext = await resolveGoldenPatientContext(fhirConfig, resource);
+    goldenPatientId = resolvedContext?.goldenPatientId || null;
+  }
+
+  if (resource?.id && goldenPatientId) {
+    const withEnterpriseId = withEnterpriseIdentifier(resource, goldenPatientId);
+    if (withEnterpriseId.changed) {
+      const updateResponse = await updatePatient(
+        {
+          baseUrl: fhirConfig.baseUrl,
+          timeoutMs: fhirConfig.timeoutMs,
+        },
+        withEnterpriseId.patient,
+      );
+
+      resource = updateResponse.data || withEnterpriseId.patient;
+      status = updateResponse.status;
+      if (action !== 'created') {
+        action = 'updated';
+      }
+    }
   }
 
   return {
     status,
     action,
     resource,
+    goldenPatientId,
     identifierSystem: sourceIdentifierSystem,
   };
 }

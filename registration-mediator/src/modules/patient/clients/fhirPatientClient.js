@@ -160,6 +160,20 @@ export async function createPatientConditionally(
   return wrap(response);
 }
 
+export async function createPatient({ baseUrl, timeoutMs }, fhirPatient) {
+  const response = await getClient({ baseUrl, timeoutMs }).post(
+    '/Patient',
+    fhirPatient,
+    {
+      headers: {
+        Prefer: 'return=representation',
+      },
+    },
+  );
+
+  return wrap(response);
+}
+
 export async function updatePatient({ baseUrl, timeoutMs }, patient) {
   const response = await getClient({ baseUrl, timeoutMs }).put(
     `/Patient/${patient.id}`,

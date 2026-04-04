@@ -62,11 +62,29 @@ export function mdmLinksFromParameters(parametersResource) {
     );
 }
 
-export function firstLinkedGoldenPatient(links) {
-  const prioritizedResults = ['MATCH', 'POSSIBLE_MATCH'];
+export function firstLinkedGoldenPatient(links, options = {}) {
+  const prioritizedResults = ['REDIRECT', 'MATCH', 'POSSIBLE_MATCH'];
+  const focusedResourceId = nonEmptyString(options?.resourceId);
+  const focusedSourceReference = focusedResourceId
+    ? `Patient/${focusedResourceId}`
+    : null;
+
+  const withGoldenReference = (links || []).filter((candidate) =>
+    parseReferenceId(candidate?.goldenResourceId, 'Patient'),
+  );
+
+  const focusedLinks = focusedSourceReference
+    ? withGoldenReference.filter(
+        (candidate) =>
+          nonEmptyString(candidate?.sourceResourceId) === focusedSourceReference,
+      )
+    : withGoldenReference;
+
+  const searchLinks =
+    focusedLinks.length > 0 ? focusedLinks : withGoldenReference;
 
   for (const matchResult of prioritizedResults) {
-    const link = (links || []).find(
+    const link = searchLinks.find(
       (candidate) =>
         candidate?.matchResult === matchResult &&
         parseReferenceId(candidate?.goldenResourceId, 'Patient'),

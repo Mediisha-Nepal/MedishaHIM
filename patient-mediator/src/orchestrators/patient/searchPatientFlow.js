@@ -13,6 +13,9 @@ import {
   parseReferenceId,
 } from '../../utils/mdm.js';
 
+const ENTERPRISE_IDENTIFIER_SYSTEM =
+  'https://registry.example.org/id/patient/golden';
+
 function entriesFromBundle(bundle) {
   return Array.isArray(bundle?.entry) ? bundle.entry : [];
 }
@@ -59,6 +62,17 @@ function getPatientAddresses(patient) {
 
 function uniqueValues(values) {
   return [...new Set(values.filter(Boolean))];
+}
+
+function enterpriseIdFromPatient(patient) {
+  const identifiers = Array.isArray(patient?.identifier) ? patient.identifier : [];
+  const found = identifiers.find(
+    (identifier) =>
+      nonEmptyString(identifier?.system) === ENTERPRISE_IDENTIFIER_SYSTEM &&
+      nonEmptyString(identifier?.value),
+  );
+
+  return nonEmptyString(found?.value) || null;
 }
 
 async function queryMdmLinksSafe(svcOpts, query) {
@@ -257,6 +271,7 @@ async function readPatientSafe(svcOpts, id) {
 }
 
 function matchRank(matchResult) {
+  if (matchResult === 'REDIRECT') return 3;
   if (matchResult === 'MATCH') return 2;
   if (matchResult === 'POSSIBLE_MATCH') return 1;
   return 0;
@@ -277,14 +292,71 @@ function mergeCandidate(existing, incoming) {
   };
 }
 
+async function resolveCanonicalGoldenPatient(svcOpts, patient) {
+  const visited = new Set();
+  let currentResourceId = patient?.id || null;
+  let resolvedMatchResult = null;
+  let hasLinkedGolden = false;
+
+  while (currentResourceId && !visited.has(currentResourceId)) {
+    visited.add(currentResourceId);
+
+    const linksForResource = await queryMdmLinksSafe(svcOpts, {
+      resourceId: currentResourceId,
+    });
+
+    const linkedGoldenPatient = firstLinkedGoldenPatient(linksForResource, {
+      resourceId: currentResourceId,
+    });
+
+    if (!linkedGoldenPatient.goldenPatientId) {
+      break;
+    }
+
+    hasLinkedGolden = true;
+    if (linkedGoldenPatient.matchResult) {
+      resolvedMatchResult = linkedGoldenPatient.matchResult;
+    }
+
+    if (linkedGoldenPatient.goldenPatientId === currentResourceId) {
+      break;
+    }
+
+    currentResourceId = linkedGoldenPatient.goldenPatientId;
+  }
+
+  if (!hasLinkedGolden && !isGoldenPatient(patient)) {
+    return {
+      goldenPatientId: null,
+      matchResult: null,
+    };
+  }
+
+  return {
+    goldenPatientId: currentResourceId,
+    matchResult: resolvedMatchResult,
+  };
+}
+
 async function resolveDemographicCandidates(svcOpts, patient) {
-  if (isGoldenPatient(patient)) {
-    const links = await queryMdmLinksSafe(svcOpts, {
-      goldenResourceId: patient.id,
+  const explicitEnterprisePatientId = enterpriseIdFromPatient(patient);
+  const linkedGoldenPatient = await resolveCanonicalGoldenPatient(
+    svcOpts,
+    patient,
+  );
+  const canonicalEnterprisePatientId =
+    explicitEnterprisePatientId || linkedGoldenPatient.goldenPatientId;
+  const canonicalMatchResult = explicitEnterprisePatientId
+    ? 'MATCH'
+    : linkedGoldenPatient.matchResult;
+
+  if (canonicalEnterprisePatientId) {
+    const linksForGolden = await queryMdmLinksSafe(svcOpts, {
+      goldenResourceId: canonicalEnterprisePatientId,
     });
 
     const sourceLinkMap = new Map();
-    for (const link of links) {
+    for (const link of linksForGolden) {
       const sourcePatientId = parseReferenceId(link.sourceResourceId, 'Patient');
       if (!sourcePatientId) continue;
 
@@ -309,20 +381,30 @@ async function resolveDemographicCandidates(svcOpts, patient) {
         return {
           patient: sourcePatient,
           sourcePatientId: sourcePatient.id,
-          enterprisePatientId: patient.id,
-          mdmMatchResult: link.matchResult,
+          enterprisePatientId: canonicalEnterprisePatientId,
+          mdmMatchResult:
+            link.matchResult &&
+            matchRank(link.matchResult) >= matchRank(canonicalMatchResult)
+              ? link.matchResult
+              : canonicalMatchResult || link.matchResult || 'MATCH',
         };
       }),
     );
 
-    return sourceCandidates.filter(Boolean);
+    const resolvedCandidates = sourceCandidates.filter(Boolean);
+    if (resolvedCandidates.length > 0) {
+      return resolvedCandidates;
+    }
+
+    return [
+      {
+        patient,
+        sourcePatientId: patient.id,
+        enterprisePatientId: canonicalEnterprisePatientId,
+        mdmMatchResult: canonicalMatchResult || 'MATCH',
+      },
+    ];
   }
-
-  const links = await queryMdmLinksSafe(svcOpts, {
-    resourceId: patient.id,
-  });
-
-  const linkedGoldenPatient = firstLinkedGoldenPatient(links);
 
   return [
     {
@@ -347,7 +429,7 @@ function dedupeCandidates(candidates) {
 }
 
 function candidateGroupKey(candidate) {
-  if (candidate.mdmMatchResult === 'MATCH' && candidate.enterprisePatientId) {
+  if (candidate.enterprisePatientId && matchRank(candidate.mdmMatchResult) >= 2) {
     return `enterprise:${candidate.enterprisePatientId}`;
   }
 
@@ -364,11 +446,11 @@ function groupDemographicCandidates(candidates) {
     if (!existing) {
       groups.set(key, {
         patientId:
-          candidate.mdmMatchResult === 'MATCH' && candidate.enterprisePatientId
+          candidate.enterprisePatientId && matchRank(candidate.mdmMatchResult) >= 2
             ? candidate.enterprisePatientId
             : candidate.sourcePatientId,
         enterprisePatientId:
-          candidate.mdmMatchResult === 'MATCH'
+          candidate.enterprisePatientId && matchRank(candidate.mdmMatchResult) >= 2
             ? candidate.enterprisePatientId || null
             : null,
         representativePatient: candidate.patient,

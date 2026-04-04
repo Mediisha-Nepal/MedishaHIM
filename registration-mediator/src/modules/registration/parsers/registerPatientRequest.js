@@ -92,8 +92,15 @@ function toPatientPayload(body) {
 function toEncounterPayload(body) {
   const encounter = isObject(body?.encounter) ? { ...body.encounter } : {};
 
-  if (!encounter.encounter_id && body?.encounter_id) {
-    encounter.encounter_id = body.encounter_id;
+  if (!encounter.encounter_id) {
+    encounter.encounter_id =
+      encounter.encounter_number ||
+      encounter.vn ||
+      body?.encounter_id || body?.encounter_number || body?.vn;
+  }
+
+  if (!encounter.local_encounter_id && body?.local_encounter_id) {
+    encounter.local_encounter_id = body.local_encounter_id;
   }
 
   if (!encounter.encounter_class && body?.encounter_class) {
@@ -175,11 +182,13 @@ export function parseRegisterPatientRequest(body, defaults, authContext = {}) {
     nonEmptyString(body?.source_patient_id) ||
     nonEmptyString(body?.patient_id) ||
     nonEmptyString(body?.fhir_patient_id) ||
+    nonEmptyString(body?.golden_patient_id) ||
     nonEmptyString(body?.enterprise_patient_id) ||
     nonEmptyString(body?.patient?.selected_patient_id) ||
     nonEmptyString(body?.patient?.source_patient_id) ||
     nonEmptyString(body?.patient?.patient_id) ||
     nonEmptyString(body?.patient?.fhir_patient_id) ||
+    nonEmptyString(body?.patient?.golden_patient_id) ||
     nonEmptyString(body?.patient?.enterprise_patient_id);
 
   return {

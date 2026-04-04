@@ -62,14 +62,38 @@ export function mdmLinksFromParameters(parametersResource) {
     );
 }
 
-export function firstMatchGoldenPatientId(links) {
-  const matchLink = (links || []).find(
-    (link) =>
-      link?.matchResult === 'MATCH' &&
-      parseResourceReferenceId(link?.goldenResourceId, 'Patient'),
+export function firstMatchGoldenPatientId(links, options = {}) {
+  const prioritizedResults = ['REDIRECT', 'MATCH', 'POSSIBLE_MATCH'];
+  const focusedResourceId = nonEmptyString(options?.resourceId);
+  const focusedSourceReference = focusedResourceId
+    ? `Patient/${focusedResourceId}`
+    : null;
+
+  const withGoldenReference = (links || []).filter((link) =>
+    parseResourceReferenceId(link?.goldenResourceId, 'Patient'),
   );
 
-  return matchLink
-    ? parseResourceReferenceId(matchLink.goldenResourceId, 'Patient')
-    : null;
+  const focusedLinks = focusedSourceReference
+    ? withGoldenReference.filter(
+        (link) =>
+          nonEmptyString(link?.sourceResourceId) === focusedSourceReference,
+      )
+    : withGoldenReference;
+
+  const searchLinks =
+    focusedLinks.length > 0 ? focusedLinks : withGoldenReference;
+
+  for (const matchResult of prioritizedResults) {
+    const matchLink = searchLinks.find(
+      (link) =>
+        link?.matchResult === matchResult &&
+        parseResourceReferenceId(link?.goldenResourceId, 'Patient'),
+    );
+
+    if (matchLink) {
+      return parseResourceReferenceId(matchLink.goldenResourceId, 'Patient');
+    }
+  }
+
+  return null;
 }
